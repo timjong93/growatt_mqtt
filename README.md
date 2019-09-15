@@ -12,7 +12,7 @@ You will need to use an RS485 -> TTL adapter, when using and ESP8266 make sure t
 ESP8266 --> RS485 to TTL --> Growatt Inverter.
 
 ## Home Assistant
-Use the following sesnor s to integrate with Home Assistant
+Use the following sensors to integrate with Home Assistant
 ``` YAML
 - platform: mqtt
   state_topic: "house/energy/growatt/status"
@@ -59,12 +59,12 @@ Use the following sesnor s to integrate with Home Assistant
   unit_of_measurement: W
   qos: 0
 - platform: mqtt
-  state_topic: "house/energy/growatt/EToday"
+  state_topic: "house/energy/growatt/Etoday"
   name: "Solar inverter total energy today"
   unit_of_measurement: KWH
   qos: 0
 - platform: mqtt
-  state_topic: "house/energy/growatt/ETotal"
+  state_topic: "house/energy/growatt/Etotal"
   name: "Solar inverter total energy"
   unit_of_measurement: KWH
   qos: 0
@@ -74,7 +74,7 @@ Use the following sesnor s to integrate with Home Assistant
   unit_of_measurement: S
   qos: 0
 - platform: mqtt
-  state_topic: "house/energy/growatt/TInverter"
+  state_topic: "house/energy/growatt/Tinverter"
   name: "Solar inverter inverter temperature"
   unit_of_measurement: C
   qos: 0
