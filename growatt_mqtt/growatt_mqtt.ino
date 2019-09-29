@@ -520,7 +520,7 @@ Application keeps doing this after running setup
 *******************************************************************/
 
 typedef void (* GenericFP)();
-GenericFP fnArr[7] = {&update_growatt, &update_wp, &get_filter_status, &get_temperatures, &get_fan_status, &get_valve_status, &get_bypass_control};
+GenericFP fnArr[8] = {&update_growatt, &update_wp, &get_filter_status, &get_temperatures, &get_fan_status, &get_valve_status, &get_bypass_control, &get_ventilation_status};
 unsigned long next_poll = 0;
 
 void loop() {
@@ -533,7 +533,7 @@ void loop() {
   }
   mqtt_client.loop();
   if(millis() > next_poll){
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < 8; i++)
     {
       fnArr[i]();
       mqtt_client.loop();
