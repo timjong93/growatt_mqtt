@@ -8,6 +8,7 @@
 #include <SoftwareSerial.h>
 #include "secrets.h"
 #include "mqtt_topics.h"
+
 /******************************************************************
 Secrets, please change these in the secrets.h file
 *******************************************************************/
@@ -21,13 +22,12 @@ const int   mqtt_port     = MQTT_PORT;
 const char* mqtt_username = MQTT_USERNAME;
 const char* mqtt_password = MQTT_PASSWORD;
 
-const char* mqtt_topic_base = MQTT_TOPIC_BASE;
-const char* mqtt_topic_whr_base = MQTT_TOPIC_WHR_BASE;
-const char* mqtt_logtopic = MQTT_LOGTOPIC;
+const char* mqtt_topic_base               = MQTT_TOPIC_BASE;
+const char* mqtt_topic_whr_base           = MQTT_TOPIC_WHR_BASE;
+const char* mqtt_logtopic                 = MQTT_LOGTOPIC;
 const char* mqtt_set_wp_temperature_topic = MQTT_SET_WP_TEMPERATURE_TOPIC;
-const char* mqtt_set_ventilation_topic = MQTT_SET_VENTILATION_TOPIC;
-const char* mqtt_set_temperature_topic = MQTT_SET_TEMPERATURE_TOPIC;
-const char* mqtt_get_update_topic = MQTT_GET_UPDATE_TOPIC;
+const char* mqtt_set_ventilation_topic    = MQTT_SET_VENTILATION_TOPIC;
+const char* mqtt_set_temperature_topic    = MQTT_SET_TEMPERATURE_TOPIC;
 
 /******************************************************************
 Useful for debugging, outputs info to a separate mqtt topic
@@ -41,6 +41,7 @@ int data_length = 0;
 char log_msg[256];
 char mqtt_topic[256];
 
+bool whr_online = false;
 /******************************************************************
 Instantiate modbus and mqtt libraries
 *******************************************************************/
@@ -51,6 +52,7 @@ WiFiClient mqtt_wifi_client;
 PubSubClient mqtt_client(mqtt_wifi_client);
 
 SoftwareSerial swSer(13, 15, false, 128);
+
 /******************************************************************
 Log debug to mqtt
 *******************************************************************/
@@ -66,7 +68,6 @@ void log_message(char* string)
  Callback function that is called when a message has been pushed to one of your topics.
 *******************************************************************************************/
 void mqtt_callback(char* topic, byte* payload, unsigned int length) {
-  log_message("read mqtt input");
   char msg[length + 1];
   for (int i=0; i < length; i++) {
     msg[i] = (char)payload[i];
@@ -83,6 +84,8 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     // instantiate modbusmaster with slave id wp
     node.begin(slave_id_wp, Serial);
     node.writeSingleRegister(54, temp_converted);
+
+    update_wp();
   }
   if (strcmp(topic, mqtt_set_ventilation_topic) == 0)
   {
@@ -92,7 +95,13 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
 
     sprintf(log_msg, "set ventilation to %d", ventilation - 1); log_message(log_msg);
     byte command[] = {0x07, 0xF0, 0x00, 0x99, 0x01, ventilation, checksum, 0x07, 0x0F};
+
+    if (!whr_online) {
+      return;
+    }
     send_whr_command(command, sizeof(command));
+
+    get_ventilation_status();
   }
   if (strcmp(topic, mqtt_set_temperature_topic) == 0)
   {
@@ -104,7 +113,13 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
     
     sprintf(log_msg, "set temperature to %d", temperature); log_message(log_msg);
     byte command[] = {0x07, 0xF0, 0x00, 0xD3, 0x01, temperature, checksum, 0x07, 0x0F};
+
+    if (!whr_online) {
+      return;
+    }
     send_whr_command(command, sizeof(command));
+
+    get_temperatures();
   }
   
 }
@@ -208,7 +223,6 @@ void mqtt_reconnect()
       mqtt_client.subscribe(mqtt_set_wp_temperature_topic);
       mqtt_client.subscribe(mqtt_set_ventilation_topic);
       mqtt_client.subscribe(mqtt_set_temperature_topic);
-      mqtt_client.subscribe(mqtt_get_update_topic);
     } else {
       // Wait 5 seconds before retrying
       delay(5000);
@@ -339,23 +353,23 @@ WHR 930
 *******************************************************************/
 void send_whr_command(byte* command, int length)
 {  
-  log_message("sending command");
-  sprintf(log_msg, "Data length   : %d", length); log_message(log_msg);
-  sprintf(log_msg, "Ack           : %02X %02X", command[0], command[1]); log_message(log_msg);
-  sprintf(log_msg, "Start         : %02X %02X", command[2], command[3]); log_message(log_msg);
-  sprintf(log_msg, "Command       : %02X %02X", command[4], command[5]); log_message(log_msg);
-  sprintf(log_msg, "Nr data bytes : %02X (integer %d)", command[6], command[6]); log_message(log_msg);
+//  log_message("sending command");
+//  sprintf(log_msg, "Data length   : %d", length); log_message(log_msg);
+//  sprintf(log_msg, "Ack           : %02X %02X", command[0], command[1]); log_message(log_msg);
+//  sprintf(log_msg, "Start         : %02X %02X", command[2], command[3]); log_message(log_msg);
+//  sprintf(log_msg, "Command       : %02X %02X", command[4], command[5]); log_message(log_msg);
+//  sprintf(log_msg, "Nr data bytes : %02X (integer %d)", command[6], command[6]); log_message(log_msg);
 
   int bytesSent = swSer.write(command, length);
-  sprintf(log_msg, "sent bytes    : %d", bytesSent); log_message(log_msg);
+//  sprintf(log_msg, "sent bytes    : %d", bytesSent); log_message(log_msg);
 
   // wait until the serial buffer is filled with the replies
-  delay(1000);
+  delay(500);
 
   // read the serial
   readSerial();
   
-  sprintf(log_msg, "received size : %d", data_length); log_message(log_msg);
+//  sprintf(log_msg, "received size : %d", data_length); log_message(log_msg);
 }
 
 void readSerial()
@@ -396,10 +410,31 @@ void readSerial()
   }
 }
 
-void get_filter_status() {  
+void check_whr() {
+    log_message("Trying to read whr930..");
+
+    // get filter state command as dummy to see if we receive data back
     byte command[] = {0x07, 0xF0, 0x00, 0xD9, 0x00, 0x86, 0x07, 0x0F};
     send_whr_command(command, sizeof(command));
 
+    if (data_length > 0) {
+      whr_online = true;
+      publishInt("ventilation/whr930/status", 1);
+    } else {
+      whr_online = false;
+      publishInt("ventilation/whr930/status", -1);
+    }
+}
+
+void get_filter_status() {
+    if (!whr_online) {
+      return;
+    }
+    byte command[] = {0x07, 0xF0, 0x00, 0xD9, 0x00, 0x86, 0x07, 0x0F};
+    send_whr_command(command, sizeof(command));
+    if (data_length <= 0) {
+      return;
+    }
     int filter_state = (int)(data[18]);
     
     char* filter_state_string;
@@ -410,14 +445,21 @@ void get_filter_status() {
     } else {
       filter_state_string = "Unknown"; 
     }
-    sprintf(log_msg, "received filter state : %d (%s)", filter_state, filter_state_string); log_message(log_msg);
+//    sprintf(log_msg, "received filter state : %d (%s)", filter_state, filter_state_string); log_message(log_msg);
     
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "filter_state"); mqtt_client.publish(mqtt_topic, filter_state_string);
 }
 
 void get_temperatures() {  
+    if (!whr_online) {
+      return;
+    }
     byte command[] = {0x07, 0xF0, 0x00, 0xD1, 0x00, 0x7E, 0x07, 0x0F};
     send_whr_command(command, sizeof(command));
+
+    if (data_length <= 0) {
+      return;
+    }
     
     float ComfortTemp = (float)data[6] / 2.0 - 20;
     float OutsideAirTemp = (float)data[7] / 2.0 - 20;
@@ -425,8 +467,8 @@ void get_temperatures() {
     float ReturnAirTemp = (float)data[9] / 2.0 - 20;
     float ExhaustAirTemp = (float)data[10] / 2.0 - 20;
     
-    sprintf(log_msg, "received temperatures (comfort, outside, supply, return, exhaust): %.2f, %.2f, %.2f, %.2f, %.2f", ComfortTemp, OutsideAirTemp, SupplyAirTemp, ReturnAirTemp, ExhaustAirTemp); log_message(log_msg);
-
+//    sprintf(log_msg, "received temperatures (comfort, outside, supply, return, exhaust): %.2f, %.2f, %.2f, %.2f, %.2f", ComfortTemp, OutsideAirTemp, SupplyAirTemp, ReturnAirTemp, ExhaustAirTemp); log_message(log_msg);
+  
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "comfort_temp"); mqtt_client.publish(mqtt_topic, String(ComfortTemp).c_str());
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "outside_air_temp"); mqtt_client.publish(mqtt_topic, String(OutsideAirTemp).c_str());
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "supply_air_temp"); mqtt_client.publish(mqtt_topic, String(SupplyAirTemp).c_str());
@@ -435,16 +477,21 @@ void get_temperatures() {
 }
 
 void get_ventilation_status() {  
+    if (!whr_online) {
+      return;
+    }
     byte command[] = {0x07, 0xF0, 0x00, 0xCD, 0x00, 0x7A, 0x07, 0x0F};
     send_whr_command(command, sizeof(command));
 
-    
+    if (data_length <= 0) {
+      return;
+    }
     float ReturnAirLevel = (float)data[12];
     float SupplyAirLevel = (float)data[13];
     int FanLevel = (int)data[14] - 1;
     int IntakeFanActive = (int)data[15];
      
-    sprintf(log_msg, "received ventilation status (return air level, supply air level, fan level, intake fan active): %.2f, %.2f, %d, %d", ReturnAirLevel, SupplyAirLevel, FanLevel, IntakeFanActive); log_message(log_msg);
+//    sprintf(log_msg, "received ventilation status (return air level, supply air level, fan level, intake fan active): %.2f, %.2f, %d, %d", ReturnAirLevel, SupplyAirLevel, FanLevel, IntakeFanActive); log_message(log_msg);
     
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "return_air_level"); mqtt_client.publish(mqtt_topic, String(ReturnAirLevel).c_str());
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "supply_air_level"); mqtt_client.publish(mqtt_topic, String(SupplyAirLevel).c_str());
@@ -459,32 +506,42 @@ void get_ventilation_status() {
       IntakeFanActive_string = "Unknown"; 
     }
     
-    sprintf(mqtt_topic, "%s/%s", mqtt_topic_base, "intake_fan_active");  mqtt_client.publish(mqtt_topic, IntakeFanActive_string);
+    sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "intake_fan_active");  mqtt_client.publish(mqtt_topic, IntakeFanActive_string);
 }
 
 void get_fan_status() {  
+    if (!whr_online) {
+      return;
+    }
     byte command[] = {0x07, 0xF0, 0x00, 0x0B, 0x00, 0xB8, 0x07, 0x0F};
     send_whr_command(command, sizeof(command));
-
+    if (data_length <= 0) {
+      return;
+    }
     float IntakeFanSpeed = (int)data[6];
     float ExhaustFanSpeed = (int)data[7];
 
-    sprintf(log_msg, "received fan speeds (intake, exhaust): %.2f, %.2f", IntakeFanSpeed, ExhaustFanSpeed); log_message(log_msg);
+//    sprintf(log_msg, "received fan speeds (intake, exhaust): %.2f, %.2f", IntakeFanSpeed, ExhaustFanSpeed); log_message(log_msg);
     
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "intake_fan_speed"); mqtt_client.publish(mqtt_topic, String(IntakeFanSpeed).c_str());
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "exhaust_fan_speed"); mqtt_client.publish(mqtt_topic, String(ExhaustFanSpeed).c_str());
 }
 
 void get_valve_status() {  
+    if (!whr_online) {
+      return;
+    }
     byte command[] = {0x07, 0xF0, 0x00, 0x0D, 0x00, 0xBA, 0x07, 0x0F};
     send_whr_command(command, sizeof(command));
-
+    if (data_length <= 0) {
+      return;
+    }
     int ByPass = (int)data[7];
     int PreHeating = (int)data[8];
     int ByPassMotorCurrent = (int)data[9];
     int PreHeatingMotorCurrent = (int)data[10];
  
-    sprintf(log_msg, "received fan status (bypass, preheating, bypassmotorcurrent, preheatingmotorcurrent): %d, %d, %d, %d", ByPass, PreHeating, ByPassMotorCurrent, PreHeatingMotorCurrent); log_message(log_msg);
+//    sprintf(log_msg, "received fan status (bypass, preheating, bypassmotorcurrent, preheatingmotorcurrent): %d, %d, %d, %d", ByPass, PreHeating, ByPassMotorCurrent, PreHeatingMotorCurrent); log_message(log_msg);
     
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "valve_bypass_percentage"); mqtt_client.publish(mqtt_topic, String(ByPass).c_str());
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "valve_preheating"); mqtt_client.publish(mqtt_topic, String(PreHeating).c_str());
@@ -493,9 +550,14 @@ void get_valve_status() {
 }
 
 void get_bypass_control() {
+    if (!whr_online) {
+      return;
+    }
     byte command[] = {0x07, 0xF0, 0x00, 0xDF, 0x00, 0x8C, 0x07, 0x0F};
     send_whr_command(command, sizeof(command));
-
+    if (data_length <= 0) {
+      return;
+    }
     int ByPassFactor  = (int)data[9];
     int ByPassStep  = (int)data[10];
     int ByPassCorrection  = (int)data[11];
@@ -506,7 +568,7 @@ void get_bypass_control() {
     } else {
       summerModeString = "No";
     }
-    sprintf(log_msg, "received bypass control (bypassfactor, bypass step, bypass correction, summer mode): %d, %d, %d, %s", ByPassFactor, ByPassStep, ByPassCorrection, summerModeString); log_message(log_msg);
+//    sprintf(log_msg, "received bypass control (bypassfactor, bypass step, bypass correction, summer mode): %d, %d, %d, %s", ByPassFactor, ByPassStep, ByPassCorrection, summerModeString); log_message(log_msg);
     
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "bypass_factor"); mqtt_client.publish(mqtt_topic, String(ByPassFactor).c_str());
     sprintf(mqtt_topic, "%s/%s", mqtt_topic_whr_base, "bypass_step"); mqtt_client.publish(mqtt_topic, String(ByPassStep).c_str());
@@ -520,7 +582,8 @@ Application keeps doing this after running setup
 *******************************************************************/
 
 typedef void (* GenericFP)();
-GenericFP fnArr[8] = {&update_growatt, &update_wp, &get_filter_status, &get_temperatures, &get_fan_status, &get_valve_status, &get_bypass_control, &get_ventilation_status};
+const uint num_functions = 9;
+GenericFP fnArr[num_functions] = {&update_growatt, &update_wp, &check_whr, &get_filter_status, &get_temperatures, &get_fan_status, &get_valve_status, &get_bypass_control, &get_ventilation_status};
 unsigned long next_poll = 0;
 
 void loop() {
@@ -532,15 +595,13 @@ void loop() {
     mqtt_reconnect();
   }
   mqtt_client.loop();
-  if(millis() > next_poll){
-    for (int i = 0; i < 8; i++)
+  
+  if(millis() >= next_poll){
+    for (int i = 0; i < num_functions; i++)
     {
       fnArr[i]();
       mqtt_client.loop();
     }
     next_poll = millis() + 10000;
-  }else{
-    mqtt_client.loop();
   }
-
 }
