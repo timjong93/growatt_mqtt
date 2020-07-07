@@ -12,15 +12,15 @@
 /******************************************************************
 Secrets, please change these in the secrets.h file
 *******************************************************************/
-const char* wifi_ssid     = WIFI_SSID;
-const char* wifi_password = WIFI_PASSWORD;
-const char* wifi_hostname = WIFI_HOSTNAME;
-const char* ota_password  = OTA_PASSWORD;
+const char* wifi_ssid                  = WIFI_SSID;
+const char* wifi_password              = WIFI_PASSWORD;
+const char* wifi_hostname              = WIFI_HOSTNAME;
+const char* ota_password               = OTA_PASSWORD;
 
-const char* mqtt_server   = MQTT_SERVER;
-const int   mqtt_port     = MQTT_PORT;
-const char* mqtt_username = MQTT_USERNAME;
-const char* mqtt_password = MQTT_PASSWORD;
+const char* mqtt_server                = MQTT_SERVER;
+const int   mqtt_port                  = MQTT_PORT;
+const char* mqtt_username              = MQTT_USERNAME;
+const char* mqtt_password              = MQTT_PASSWORD;
 
 const char* mqtt_topic_base               = MQTT_TOPIC_BASE;
 const char* mqtt_topic_whr_base           = MQTT_TOPIC_WHR_BASE;
@@ -190,9 +190,6 @@ void publishFloat(char * topic, float f) {
   char value_char[32] = "";
   value_str.toCharArray(value_char, 40);
 
-  String topic_str = "inverter/" + String(topic);
-  char topic_char[128] = "";
-  topic_str.toCharArray(topic_char, 128);
   sprintf(mqtt_topic, "%s/%s", mqtt_topic_base, topic);
   
   mqtt_client.publish(mqtt_topic, value_char); 
@@ -246,7 +243,7 @@ void update_growatt() {
   char topic[40] = "";
   char value[40] = "";
   log_message("Trying to read inverter..");
-
+  
   // instantiate modbusmaster with slave id growatt
   node.begin(slave_id_growatt, Serial);
   
@@ -374,7 +371,6 @@ void send_whr_command(byte* command, int length)
 
 void readSerial()
 {
-
   if (swSer.available() > 0) {
     log_message("serial available");
     
@@ -407,6 +403,7 @@ void readSerial()
           data_length = index + 1;          
       }
     }
+
   }
 }
 
@@ -443,6 +440,8 @@ void get_filter_status() {
     } else if (filter_state == 1) {
       filter_state_string = "Full";
     } else {
+      
+    
       filter_state_string = "Unknown"; 
     }
 //    sprintf(log_msg, "received filter state : %d (%s)", filter_state, filter_state_string); log_message(log_msg);
