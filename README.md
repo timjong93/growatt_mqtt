@@ -3,7 +3,7 @@
 _This is still a work in progress 14-09-2019._
 
 This application is build for an ESP8266, tested on NodeMCU.
-It reads values from an growatt solar power inverter using modbus. and publishes these values using MQTT for use with for example Home Assistant or any other application of your preference.
+It reads values from an growatt solar power inverter, mitsubishi heat exchanger and whr930 mechanical ventilation using modbus. These value are published using MQTT for use with for example Home Assistant or any other application of your preference.
 
 ## Wiring
 
